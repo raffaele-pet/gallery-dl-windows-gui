@@ -12,8 +12,6 @@ def run(payload):
     sys.argv = ['gallery-dl', '--config-ignore', '--no-input', '--no-colors',
                 '--directory', payload['destination'], '--retries', '2', '--http-timeout', '25',
                 '--Print', 'after:__GDL_NEW__{_path}', '--Print', 'skip:__GDL_OLD__{_path}']
-    if payload.get('browser'):
-        sys.argv.extend(('--cookies-from-browser', payload['browser']))
     sys.argv.append(payload['url'])
     return main()
 

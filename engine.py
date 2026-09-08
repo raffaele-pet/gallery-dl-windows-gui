@@ -197,12 +197,39 @@ def generic_download(url, destination):
 
 
 def browser_context(playwright, host, headed=False):
-    profile = APP_DIR / '.browser-profile' / re.sub(r'[^\w.-]', '_', host)
+    profile = browser_profile(host)
     profile.mkdir(parents=True, exist_ok=True)
-    executable = Path(os.environ.get('PROGRAMFILES', '')) / 'BraveSoftware/Brave-Browser/Application/brave.exe'
-    launch = {'executable_path': str(executable)} if executable.is_file() else {}
+    executable, _ = default_browser()
+    launch = {'executable_path': str(executable)} if executable else {}
     return playwright.chromium.launch_persistent_context(str(profile), headless=not headed,
         viewport={'width': 1150, 'height': 800}, accept_downloads=False, **launch)
+
+
+def default_browser():
+    """Return Windows' default HTTPS Chromium executable and display name."""
+    if sys.platform == 'win32':
+        try:
+            import winreg
+            choice = r'Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice'
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, choice) as key:
+                prog_id = winreg.QueryValueEx(key, 'ProgId')[0]
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog_id + r'\shell\open\command') as key:
+                command = os.path.expandvars(winreg.QueryValueEx(key, '')[0])
+            match = re.search(r'"([^\"]+\.exe)"|([^\s]+\.exe)', command, re.I)
+            if match:
+                path = Path(match.group(1) or match.group(2))
+                families = {'chrome.exe': 'Google Chrome', 'brave.exe': 'Brave', 'msedge.exe': 'Microsoft Edge'}
+                if path.is_file() and path.name.lower() in families:
+                    return path, families[path.name.lower()]
+        except (OSError, ValueError):
+            pass
+    return None, 'browser automatico'
+
+
+def browser_profile(host):
+    executable, _ = default_browser()
+    family = executable.stem.lower() if executable else 'chromium'
+    return APP_DIR / '.browser-profile' / family / re.sub(r'[^\w.-]', '_', host)
 
 
 def rendered_images(url):
@@ -225,14 +252,15 @@ def rendered_images(url):
 
 def instagram_cookies(url, interactive=False):
     from playwright.sync_api import sync_playwright
-    if not interactive and not (APP_DIR / '.browser-profile/instagram.com').exists():
+    if not interactive and not browser_profile('instagram.com').exists():
         return []
     os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(APP_DIR / '.browser-binaries')
     with sync_playwright() as playwright:
         with browser_context(playwright, 'instagram.com', headed=interactive) as context:
             if not interactive:
                 return context.cookies('https://www.instagram.com/')
-            emit('status', text='Instagram richiede l’accesso. Accedi nella finestra aperta: il download ripartirà da solo.')
+            _, browser_name = default_browser()
+            emit('status', text=f'Instagram richiede l’accesso. Accedi nella nuova finestra di {browser_name}: il download ripartirà da solo.')
             page = context.pages[0] if context.pages else context.new_page()
             page.goto(url, wait_until='domcontentloaded', timeout=45000)
             deadline = time.monotonic() + 300
@@ -247,39 +275,13 @@ def instagram_cookies(url, interactive=False):
             raise ValueError('Accesso non completato entro 5 minuti. Premi Scarica per riprovare.')
 
 
-def browser_candidates():
-    """Installed browser profiles, newest cookie store first per browser."""
-    local = Path(os.environ.get('LOCALAPPDATA', ''))
-    roaming = Path(os.environ.get('APPDATA', ''))
-    roots = (
-        ('Brave', 'brave', local / 'BraveSoftware/Brave-Browser/User Data', 'Network/Cookies'),
-        ('Chrome', 'chrome', local / 'Google/Chrome/User Data', 'Network/Cookies'),
-        ('Edge', 'edge', local / 'Microsoft/Edge/User Data', 'Network/Cookies'),
-        ('Firefox', 'firefox', roaming / 'Mozilla/Firefox/Profiles', 'cookies.sqlite'),
-    )
-    result = []
-    for label, browser, root, relative in roots:
-        profiles = []
-        if root.is_dir():
-            for profile in root.iterdir():
-                cookie_file = profile / relative
-                if profile.is_dir() and cookie_file.is_file():
-                    try:
-                        profiles.append((cookie_file.stat().st_mtime_ns, profile))
-                    except OSError:
-                        pass
-        for _, profile in sorted(profiles, reverse=True)[:4]:
-            result.append((f'{label} ({profile.name})', f'{browser}/instagram.com:{profile}'))
-    return result
-
-
-def gallery_download(url, destination, cookies=None, browser=None, publish_logs=True):
+def gallery_download(url, destination, cookies=None, publish_logs=True):
     command = [sys.executable, '-u', str(APP_DIR / 'gallery_worker.py')]
     with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                           text=True, encoding='utf-8', errors='replace',
                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)) as process:
         process.stdin.write(json.dumps({'url': url, 'destination': str(destination),
-                                        'cookies': cookies or [], 'browser': browser}) + '\n')
+                                        'cookies': cookies or []}) + '\n')
         process.stdin.close()
         count = 0
         logs = []
@@ -316,21 +318,10 @@ def run(payload):
                 if not instagram:
                     downloaded, failed, _ = gallery_download(url, destination)
                 else:
-                    attempted_logs = []
                     cookies = instagram_cookies(url)
                     downloaded, failed, logs = gallery_download(url, destination, cookies, publish_logs=False)
-                    attempted_logs.extend(logs)
                     if not downloaded:
-                        for label, browser in browser_candidates():
-                            emit('status', text=f'Cerco una sessione Instagram in {label}…')
-                            downloaded, failed, logs = gallery_download(
-                                url, destination, browser=browser, publish_logs=False)
-                            attempted_logs.extend(logs)
-                            if downloaded:
-                                emit('log', text=f'Sessione Instagram riutilizzata da {label}.')
-                                break
-                    if not downloaded:
-                        for line in attempted_logs[-3:]:
+                        for line in logs[-2:]:
                             emit('log', text=line)
                         cookies = instagram_cookies(url, interactive=True)
                         downloaded, failed, _ = gallery_download(url, destination, cookies)

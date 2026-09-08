@@ -8,7 +8,7 @@ import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from unittest.mock import patch
+from unittest.mock import call, patch
 from PIL import Image
 import engine
 
@@ -112,6 +112,22 @@ class Tests(unittest.TestCase):
 
     def test_browser_rendering(self):
         self.assertIn(self.base + '/image.png', engine.rendered_images(self.base + '/dynamic'))
+
+    def test_default_browser_fallback(self):
+        with patch.object(engine.sys, 'platform', 'not-windows'):
+            self.assertEqual(engine.default_browser(), (None, 'browser automatico'))
+            self.assertEqual(engine.browser_profile('instagram.com'), engine.APP_DIR / '.browser-profile/chromium/instagram.com')
+
+    def test_instagram_goes_directly_to_managed_login(self):
+        url = 'https://www.instagram.com/example/'
+        login_cookie = [{'name': 'sessionid', 'value': 'test', 'domain': '.instagram.com'}]
+        with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()), \
+                patch('gallery_dl.extractor.find', return_value=object()), \
+                patch('engine.instagram_cookies', side_effect=[[], login_cookie]) as cookies, \
+                patch('engine.gallery_download', side_effect=[(0, 64, ['not found']), (1, 0, [])]) as download:
+            self.assertEqual(engine.run({'urls': [url], 'destination': tmp}), 0)
+            self.assertEqual(cookies.call_args_list, [call(url), call(url, interactive=True)])
+            self.assertEqual(download.call_count, 2)
 
     def test_worker_protocol(self):
         with tempfile.TemporaryDirectory() as tmp:
