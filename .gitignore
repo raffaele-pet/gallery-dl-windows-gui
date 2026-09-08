@@ -1,6 +1,8 @@
 __pycache__/
 *.py[cod]
 .venv/
+.browser-profile/
+.browser-binaries/
 .gallery-dl-gui.json
 *.part
 *.temp

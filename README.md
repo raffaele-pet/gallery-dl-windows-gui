@@ -1,96 +1,41 @@
 # Gallery-DL Windows GUI
 
-Interfaccia grafica non ufficiale per [gallery-dl](https://codeberg.org/mikf/gallery-dl), pensata per scaricare immagini, gallerie, raccolte, profili e contenuti supportati su Windows senza usare manualmente il terminale.
-
-L’interfaccia riprende il flusso del progetto [yt-dlp Windows GUI](https://github.com/raffaele-pet/yt-dlp-windows-gui) e usa la palette di [gallery-dl.com](https://gallery-dl.com/): blu/viola profondo, bianco e verde lime.
-
-## Funzionalità
-
-- uno o più URL nella stessa operazione;
-- file di input, con possibilità di commentare o rimuovere gli URL completati;
-- download normale, simulazione, estrazione URL, JSON, informazioni extractor e keyword;
-- destinazione, struttura delle cartelle e formato dei nomi personalizzabili;
-- cookie direttamente da Chrome, Edge, Firefox, Brave e Opera;
-- cookie da file, esportazione cookie, username/password e `.netrc`;
-- proxy HTTP/SOCKS, User-Agent, IPv4/IPv6, retry, timeout e limiti di velocità;
-- intervalli e filtri per file, post e child extractor;
-- filtri per data, dimensione, categoria e tag;
-- archivio SQLite anti-duplicati;
-- metadati JSON, `info.json`, tag, ZIP/CBZ e conversione Pixiv Ugoira;
-- postprocessor, comandi per-file/finali e template `--Print`;
-- configurazioni JSON/YAML/TOML e editor JSON integrato;
-- opzioni arbitrarie `KEY=VALUE` e argomenti CLI aggiuntivi per coprire anche opzioni specifiche dei singoli siti e funzionalità future;
-- elenco degli extractor/moduli, stato e manutenzione della cache;
-- log, avanzamento, annullamento sicuro e verifica dei file creati;
-- aggiornamento stabile o versione di sviluppo dall’interfaccia.
-
-## Requisiti
-
-- Windows 10 o Windows 11;
-- connessione Internet;
-- [WinGet](https://learn.microsoft.com/windows/package-manager/winget/), normalmente incluso tramite **App Installer**.
-
-Python, `gallery-dl`, `yt-dlp`, le dipendenze opzionali principali e FFmpeg vengono installati o aggiornati automaticamente.
+Incolla il link, scegli dove salvare e premi **Scarica**. Nessun menu di configurazione, nessun cookie da esportare a mano.
 
 ## Installazione
 
-1. Scarica la repository come ZIP ed estraila.
-2. Fai doppio clic su `INSTALL.bat`.
-3. Attendi la verifica finale.
-4. Avvia **Gallery-DL** dal collegamento creato sul Desktop oppure tramite `RUN.vbs`.
+Su Windows 10/11 esegui `INSTALL.bat`, poi avvia `RUN.vbs` (o il collegamento Gallery-DL sul Desktop). L’installer prepara Python, gallery-dl, yt-dlp, FFmpeg e il browser automatico in un ambiente isolato. `RUN_DEBUG.cmd` mostra eventuali problemi di avvio.
 
-L’installer crea un ambiente Python isolato nella cartella `.venv`, quindi non modifica i pacchetti degli altri progetti. Ogni nuova esecuzione di `INSTALL.bat` controlla e aggiorna i componenti all’ultima versione disponibile.
+## Uso
 
-Controllo senza modifiche:
+1. Incolla uno o più link nel campo in alto: sono accettati anche link Markdown copiati da una chat.
+2. **Salva in** è la base portabile `Downloads\gallery-dl`; un percorso relativo parte dalla cartella utente. **Cartella** viene proposta dal dominio e dal percorso del primo link e resta modificabile.
+3. Premi **Scarica**. **Apri cartella** mostra il risultato; **Annulla** interrompe il lavoro senza rimuovere i file completati.
 
-```bat
-INSTALL.bat --check
+**Aggiorna** aggiorna gallery-dl e yt-dlp. Per aggiornare tutte le dipendenze e il browser, esegui nuovamente `INSTALL.bat`.
+
+## Come funziona
+
+- Gallerie, post e profili riconosciuti: estrattori dedicati di [gallery-dl](https://github.com/mikf/gallery-dl). Questi possono includere anche video presenti nella galleria.
+- Pagine web comuni, come una homepage o un articolo: lettura delle immagini HTML, lazy-loading, srcset, metadati e immagini strutturate. Viene scelta la variante responsive più grande dichiarata. Se l’HTML non contiene immagini, viene tentata la pagina renderizzata con Chromium.
+- Le immagini delle pagine normali vengono verificate prima del salvataggio; i piccoli elementi inferiori a 64 pixel per lato sono ignorati. I duplicati identici nella stessa pagina vengono saltati. Un link diretto conserva anche le immagini piccole.
+- Ogni operazione usa la sottocartella mostrata nel campo **Cartella**: per esempio `www.repubblica.it`, `www.repubblica.it-sport` o `www.instagram.com-raffaele.pet`. Incollando più link viene usato il nome ricavato dal primo.
+- Ripetere lo stesso download riutilizza la cartella: le pagine comuni deduplicano in base al contenuto e gallery-dl salta i file già presenti. Non viene aggiunto un orario, perché produrrebbe copie identiche a ogni esecuzione.
+
+Una homepage scarica le immagini contenute in quella pagina, **non tutti gli articoli dell’intero sito**. Il browser automatico esegue uno scorrimento limitato, non una scansione infinita. Non sono garantite tutte le immagini caricate dinamicamente, gli SVG o i contenuti dietro blocchi di accesso.
+
+## Accesso ai siti
+
+Non vengono richiesti file cookie, password nell’app o modifiche alla sicurezza del browser. Per Instagram l’app prova automaticamente, profilo per profilo, le sessioni disponibili in Brave, Chrome, Edge e Firefox. Un browser Chromium aperto può bloccare il database dei cookie: l’app non lo chiude forzatamente. Se nessuna sessione è leggibile, apre un profilo separato usando Brave quando installato (altrimenti Chromium): effettua lì l’accesso una sola volta. La sessione viene poi riutilizzata automaticamente e resta nella cartella locale `.browser-profile`, esclusa da Git. Non condividere questa cartella: contiene dati di sessione sensibili. Il download riparte quando il login viene rilevato; l’attesa massima è 5 minuti.
+
+Questo non elimina le restrizioni imposte da Instagram: login, verifica dell’account, contenuti privati, limiti e cambiamenti del sito possono ancora impedire l’estrazione. Gli altri siti con autenticazione obbligatoria possono richiedere un’integrazione specifica. Nessuna promessa di scaricare qualsiasi URL.
+
+## Verifica tecnica
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-## Uso rapido
+I test coprono il link Markdown di Repubblica, estrazione HTML, download HTTP reale locale, immagini non valide, duplicati, risultati parziali, messaggi del processo e rendering JavaScript. Il browser deve essere stato installato da `INSTALL.bat`.
 
-1. Incolla un URL nella scheda **Download**.
-2. Scegli la destinazione.
-3. Per siti che richiedono accesso, apri **Accesso e rete** e scegli il browser nel quale hai già effettuato il login.
-4. Premi **Avvia**.
-
-Per Instagram, ad esempio, imposta `chrome`, `edge` o `firefox` nel campo **Cookie dal browser**. Il browser potrebbe dover essere chiuso durante la lettura del database dei cookie.
-
-Il pulsante **Anteprima comando** mostra esattamente gli argomenti che verranno passati a `gallery-dl`, senza eseguirli.
-
-## Configurazione completa
-
-La scheda **Avanzate** offre tre livelli:
-
-1. controlli grafici per le opzioni più usate;
-2. righe `KEY=VALUE`, convertite in opzioni `--option`;
-3. argomenti CLI aggiuntivi, interpretati con le regole di quoting di Windows.
-
-L’editor integrato usa per impostazione predefinita:
-
-```text
-%APPDATA%\gallery-dl\config.json
-```
-
-La documentazione completa delle opzioni è disponibile sul [sito della documentazione ufficiale](https://gdl-org.github.io/docs/).
-
-## Struttura
-
-```text
-app.py                         interfaccia e orchestrazione gallery-dl
-assets/gallery-dl-logo.png     logo dell’applicazione
-INSTALL.bat                    installazione, aggiornamento e verifica
-RUN.vbs                        avvio senza finestra del terminale
-RUN_DEBUG.cmd                  avvio diagnostico
-tests/test_app.py              test della costruzione dei comandi
-```
-
-## Note legali e di sicurezza
-
-Usa il programma soltanto per contenuti che hai il diritto di scaricare e nel rispetto dei termini dei servizi interessati. Le credenziali non vengono salvate nelle preferenze della GUI. I comandi personalizzati `--exec` e gli argomenti avanzati vengono eseguiti soltanto se inseriti esplicitamente dall’utente.
-
-Questo progetto non è affiliato né approvato dal progetto ufficiale gallery-dl o dai siti supportati.
-
-## Licenza
-
-[MIT](LICENSE)
+Interfaccia non ufficiale, licenza MIT. Il logo originale e la palette sono quelli richiesti per il progetto; gallery-dl rimane un progetto indipendente. Scarica solo contenuti che sei autorizzato a salvare e rispetta le condizioni dei siti.

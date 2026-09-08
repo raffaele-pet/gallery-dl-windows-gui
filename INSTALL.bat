@@ -36,14 +36,20 @@ call :find_ffmpeg
 
 if "%CHECK_ONLY%"=="1" (
     echo [CONTROLLO] Python: !PYTHON_STATUS!
+    set "EXTRA_OK=0"
+    set "BROWSER_OK=0"
     if exist "%VENV_GDL%" (
         for /f "delims=" %%V in ('"%VENV_GDL%" --version 2^>nul') do set "GDL_VERSION=%%V"
         echo [OK] gallery-dl !GDL_VERSION!
+        "%VENV_PY%" -c "import bs4, PIL, playwright, requests" >nul 2>&1 && set "EXTRA_OK=1"
     ) else (
         echo [MANCANTE] Ambiente locale gallery-dl
     )
+    if "!EXTRA_OK!"=="1" (echo [OK] Componenti per pagine web) else (echo [MANCANTE] Componenti per pagine web)
+    if exist "%PROJECT_DIR%.browser-binaries\chromium-*" set "BROWSER_OK=1"
+    if "!BROWSER_OK!"=="1" (echo [OK] Browser automatico) else (echo [MANCANTE] Browser automatico)
     if "!FFMPEG_OK!"=="1" (echo [OK] FFmpeg) else (echo [MANCANTE] FFmpeg)
-    if defined PYTHON_LAUNCHER if exist "%VENV_GDL%" if "!FFMPEG_OK!"=="1" exit /b 0
+    if defined PYTHON_LAUNCHER if exist "%VENV_GDL%" if "!EXTRA_OK!"=="1" if "!BROWSER_OK!"=="1" if "!FFMPEG_OK!"=="1" exit /b 0
     exit /b 2
 )
 
@@ -89,13 +95,19 @@ if errorlevel 1 (
 
 echo.
 echo [3/6] Installazione o aggiornamento di gallery-dl e integrazioni...
-"%VENV_PY%" -m pip install --upgrade gallery-dl yt-dlp requests PySocks brotli zstandard PyYAML truststore Jinja2
+"%VENV_PY%" -m pip install --upgrade -r "%PROJECT_DIR%requirements.txt"
 if errorlevel 1 (
     call :fatal "Installazione dei pacchetti Python non riuscita."
     exit /b 1
 )
 
 echo.
+set "PLAYWRIGHT_BROWSERS_PATH=%PROJECT_DIR%.browser-binaries"
+"%VENV_PY%" -m playwright install chromium
+if errorlevel 1 (
+    call :fatal "Installazione del browser automatico non riuscita."
+    exit /b 1
+)
 echo [4/6] Controllo di FFmpeg per video HLS/DASH e Pixiv Ugoira...
 call :find_ffmpeg
 if "!FFMPEG_OK!"=="0" (
@@ -132,7 +144,7 @@ if errorlevel 1 (
     call :fatal "yt-dlp non supera la verifica."
     exit /b 1
 )
-"%VENV_PY%" -m py_compile "%PROJECT_DIR%app.py"
+"%VENV_PY%" -m py_compile "%PROJECT_DIR%app.py" "%PROJECT_DIR%engine.py" "%PROJECT_DIR%gallery_worker.py"
 if errorlevel 1 (
     call :fatal "app.py contiene un errore di sintassi."
     exit /b 1
