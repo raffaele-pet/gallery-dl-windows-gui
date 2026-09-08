@@ -199,37 +199,12 @@ def generic_download(url, destination):
 def browser_context(playwright, host, headed=False):
     profile = browser_profile(host)
     profile.mkdir(parents=True, exist_ok=True)
-    executable, _ = default_browser()
-    launch = {'executable_path': str(executable)} if executable else {}
     return playwright.chromium.launch_persistent_context(str(profile), headless=not headed,
-        viewport={'width': 1150, 'height': 800}, accept_downloads=False, **launch)
-
-
-def default_browser():
-    """Return Windows' default HTTPS Chromium executable and display name."""
-    if sys.platform == 'win32':
-        try:
-            import winreg
-            choice = r'Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice'
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, choice) as key:
-                prog_id = winreg.QueryValueEx(key, 'ProgId')[0]
-            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog_id + r'\shell\open\command') as key:
-                command = os.path.expandvars(winreg.QueryValueEx(key, '')[0])
-            match = re.search(r'"([^\"]+\.exe)"|([^\s]+\.exe)', command, re.I)
-            if match:
-                path = Path(match.group(1) or match.group(2))
-                families = {'chrome.exe': 'Google Chrome', 'brave.exe': 'Brave', 'msedge.exe': 'Microsoft Edge'}
-                if path.is_file() and path.name.lower() in families:
-                    return path, families[path.name.lower()]
-        except (OSError, ValueError):
-            pass
-    return None, 'browser automatico'
+        viewport={'width': 1150, 'height': 800}, accept_downloads=False)
 
 
 def browser_profile(host):
-    executable, _ = default_browser()
-    family = executable.stem.lower() if executable else 'chromium'
-    return APP_DIR / '.browser-profile' / family / re.sub(r'[^\w.-]', '_', host)
+    return APP_DIR / '.browser-profile' / 'chromium' / re.sub(r'[^\w.-]', '_', host)
 
 
 def rendered_images(url):
@@ -250,37 +225,94 @@ def rendered_images(url):
             return image_urls(page.content(), page.url)
 
 
-def instagram_cookies(url, interactive=False):
+def instagram_content_url(url):
+    parts = [part for part in urlsplit(url).path.split('/') if part]
+    return ((len(parts) >= 2 and parts[0].lower() in {'p', 'reel', 'tv'}) or
+            (len(parts) >= 3 and parts[1].lower() in {'p', 'reel', 'tv'}))
+
+
+def instagram_links_from_hrefs(hrefs):
+    """Normalize post links gathered while Instagram virtualizes its profile grid."""
+    links = []
+    for href in hrefs:
+        absolute = urljoin('https://www.instagram.com/', href)
+        parsed = urlsplit(absolute)
+        parts = [part for part in parsed.path.split('/') if part]
+        if (parsed.hostname or '').lower() not in {'instagram.com', 'www.instagram.com'}:
+            continue
+        if len(parts) >= 2 and parts[0].lower() in {'p', 'reel', 'tv'}:
+            kind, code = parts[0], parts[1]
+        elif len(parts) >= 3 and parts[1].lower() in {'p', 'reel', 'tv'}:
+            kind, code = parts[1], parts[2]
+        else:
+            continue
+        if code:
+            normalized = f'https://www.instagram.com/{kind.lower()}/{code}/'
+            if normalized not in links:
+                links.append(normalized)
+    return links
+
+
+def collect_instagram_links(page, max_scrolls=120):
+    """Collect the whole visible profile grid, including virtualized old entries."""
+    found = []
+    stable = 0
+    previous_height = -1
+    for _ in range(max_scrolls):
+        hrefs = page.locator('a[href]').evaluate_all('(nodes) => nodes.map((node) => node.href)')
+        before = len(found)
+        for link in instagram_links_from_hrefs(hrefs):
+            if link not in found:
+                found.append(link)
+        height = page.evaluate('document.documentElement.scrollHeight')
+        at_bottom = page.evaluate('window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 20')
+        stable = stable + 1 if len(found) == before and height == previous_height and at_bottom else 0
+        if stable >= 5:
+            break
+        previous_height = height
+        page.mouse.wheel(0, 1100)
+        page.wait_for_timeout(700)
+    return found
+
+
+def instagram_browser_data(url, interactive=False):
+    """Return session cookies and profile links from our controllable Chromium profile."""
     from playwright.sync_api import sync_playwright
-    if not interactive and not browser_profile('instagram.com').exists():
-        return []
     os.environ['PLAYWRIGHT_BROWSERS_PATH'] = str(APP_DIR / '.browser-binaries')
     with sync_playwright() as playwright:
         with browser_context(playwright, 'instagram.com', headed=interactive) as context:
-            if not interactive:
-                return context.cookies('https://www.instagram.com/')
-            _, browser_name = default_browser()
-            emit('status', text=f'Instagram richiede l’accesso. Accedi nella nuova finestra di {browser_name}: il download ripartirà da solo.')
             page = context.pages[0] if context.pages else context.new_page()
             page.goto(url, wait_until='domcontentloaded', timeout=45000)
+            page.wait_for_timeout(1800)
+            links = [] if instagram_content_url(url) else collect_instagram_links(page)
+            cookies = context.cookies('https://www.instagram.com/')
+            if links or any(cookie['name'] == 'sessionid' for cookie in cookies):
+                return cookies, links
+            if not interactive:
+                return cookies, links
+            emit('status', text='Instagram richiede l’accesso. Accedi nella finestra Chromium: il download ripartirà da solo.')
             deadline = time.monotonic() + 300
             while time.monotonic() < deadline:
                 if page.is_closed():
                     raise ValueError('Accesso non completato: finestra chiusa.')
                 cookies = context.cookies('https://www.instagram.com/')
                 if any(c['name'] == 'sessionid' for c in cookies) and '/accounts/login' not in page.url:
-                    emit('status', text='Sessione rilevata. Riprendo il download…')
-                    return cookies
+                    emit('status', text='Sessione rilevata. Leggo tutti i post del profilo…')
+                    page.goto(url, wait_until='domcontentloaded', timeout=45000)
+                    page.wait_for_timeout(1800)
+                    links = [] if instagram_content_url(url) else collect_instagram_links(page)
+                    return cookies, links
                 page.wait_for_timeout(1000)
             raise ValueError('Accesso non completato entro 5 minuti. Premi Scarica per riprovare.')
 
 
 def gallery_download(url, destination, cookies=None, publish_logs=True):
+    urls = [url] if isinstance(url, str) else list(url)
     command = [sys.executable, '-u', str(APP_DIR / 'gallery_worker.py')]
     with subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                           text=True, encoding='utf-8', errors='replace',
                           creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)) as process:
-        process.stdin.write(json.dumps({'url': url, 'destination': str(destination),
+        process.stdin.write(json.dumps({'urls': urls, 'destination': str(destination),
                                         'cookies': cookies or []}) + '\n')
         process.stdin.close()
         count = 0
@@ -299,6 +331,37 @@ def gallery_download(url, destination, cookies=None, publish_logs=True):
         return count, process.wait(), logs
 
 
+def instagram_download(url, destination):
+    """Work around Instagram's broken profile feed by downloading discovered post URLs."""
+    if instagram_content_url(url):
+        cookies, _ = instagram_browser_data(url)
+        downloaded, failed, logs = gallery_download(url, destination, cookies, publish_logs=False)
+        if downloaded:
+            for line in logs:
+                emit('log', text=line)
+            return downloaded, failed
+        if not any(cookie['name'] == 'sessionid' for cookie in cookies):
+            cookies, _ = instagram_browser_data(url, interactive=True)
+        else:
+            for line in logs[-2:]:
+                emit('log', text=line)
+        downloaded, failed, _ = gallery_download(url, destination, cookies)
+        return downloaded, failed
+
+    cookies, links = instagram_browser_data(url)
+    if not links:
+        cookies, links = instagram_browser_data(url, interactive=True)
+    if not links:
+        raise ValueError('Il profilo Instagram non contiene post visibili oppure non è accessibile con questo account.')
+    emit('log', text=f'Trovati {len(links)} post e reel. Li scarico singolarmente per aggirare il problema attuale di Instagram.')
+    emit('status', text=f'Scarico {len(links)} post e reel dal profilo…')
+    downloaded, failed, _ = gallery_download(links, destination, cookies)
+    if not downloaded and not any(cookie['name'] == 'sessionid' for cookie in cookies):
+        cookies, refreshed = instagram_browser_data(url, interactive=True)
+        downloaded, failed, _ = gallery_download(refreshed or links, destination, cookies)
+    return downloaded, failed
+
+
 def run(payload):
     from gallery_dl import extractor
     destination = Path(payload['destination']).expanduser().resolve()
@@ -306,25 +369,19 @@ def run(payload):
     count = failures = warnings = 0
     for url in normalize_urls('\n'.join(payload['urls'])):
         host = urlsplit(url).hostname
-        dedicated = extractor.find(url) is not None
+        instagram = host == 'instagram.com' or host.endswith('.instagram.com')
+        dedicated = instagram or extractor.find(url) is not None
         emit('log', text=f'Sito: {host}')
         try:
             if not dedicated:
                 downloaded, failed = generic_download(url, destination)
                 warnings += failed
             else:
-                instagram = host == 'instagram.com' or host.endswith('.instagram.com')
                 emit('status', text='Scarico con il motore dedicato al sito…')
                 if not instagram:
                     downloaded, failed, _ = gallery_download(url, destination)
                 else:
-                    cookies = instagram_cookies(url)
-                    downloaded, failed, logs = gallery_download(url, destination, cookies, publish_logs=False)
-                    if not downloaded:
-                        for line in logs[-2:]:
-                            emit('log', text=line)
-                        cookies = instagram_cookies(url, interactive=True)
-                        downloaded, failed, _ = gallery_download(url, destination, cookies)
+                    downloaded, failed = instagram_download(url, destination)
                 if not downloaded:
                     raise ValueError('Il sito non ha restituito file scaricabili. Potrebbe richiedere accesso, limitare le richieste o avere un link non più valido.')
             count += downloaded

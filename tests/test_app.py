@@ -113,21 +113,36 @@ class Tests(unittest.TestCase):
     def test_browser_rendering(self):
         self.assertIn(self.base + '/image.png', engine.rendered_images(self.base + '/dynamic'))
 
-    def test_default_browser_fallback(self):
-        with patch.object(engine.sys, 'platform', 'not-windows'):
-            self.assertEqual(engine.default_browser(), (None, 'browser automatico'))
-            self.assertEqual(engine.browser_profile('instagram.com'), engine.APP_DIR / '.browser-profile/chromium/instagram.com')
+    def test_managed_browser_profile(self):
+        self.assertEqual(engine.browser_profile('instagram.com'), engine.APP_DIR / '.browser-profile/chromium/instagram.com')
 
-    def test_instagram_goes_directly_to_managed_login(self):
+    def test_instagram_profile_falls_back_to_individual_posts(self):
         url = 'https://www.instagram.com/example/'
         login_cookie = [{'name': 'sessionid', 'value': 'test', 'domain': '.instagram.com'}]
+        posts = ['https://www.instagram.com/p/ABC/', 'https://www.instagram.com/reel/XYZ/']
         with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()), \
                 patch('gallery_dl.extractor.find', return_value=object()), \
-                patch('engine.instagram_cookies', side_effect=[[], login_cookie]) as cookies, \
-                patch('engine.gallery_download', side_effect=[(0, 64, ['not found']), (1, 0, [])]) as download:
+                patch('engine.instagram_browser_data', side_effect=[([], []), (login_cookie, posts)]) as browser, \
+                patch('engine.gallery_download', return_value=(3, 0, [])) as download:
             self.assertEqual(engine.run({'urls': [url], 'destination': tmp}), 0)
-            self.assertEqual(cookies.call_args_list, [call(url), call(url, interactive=True)])
-            self.assertEqual(download.call_count, 2)
+            self.assertEqual(browser.call_args_list, [call(url), call(url, interactive=True)])
+            download.assert_called_once_with(posts, Path(tmp), login_cookie)
+
+    def test_instagram_link_normalization(self):
+        hrefs = [
+            '/p/ABC/?img_index=2',
+            'https://www.instagram.com/reel/XYZ/?utm_source=x',
+            'https://www.instagram.com/example/p/NEWSTYLE/',
+            'https://example.org/p/NOPE/',
+            '/accounts/login/',
+            '/p/ABC/',
+        ]
+        self.assertEqual(engine.instagram_links_from_hrefs(hrefs), [
+            'https://www.instagram.com/p/ABC/',
+            'https://www.instagram.com/reel/XYZ/',
+            'https://www.instagram.com/p/NEWSTYLE/',
+        ])
+        self.assertTrue(engine.instagram_content_url('https://www.instagram.com/example/p/NEWSTYLE/'))
 
     def test_worker_protocol(self):
         with tempfile.TemporaryDirectory() as tmp:

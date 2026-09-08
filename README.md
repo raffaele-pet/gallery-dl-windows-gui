@@ -16,7 +16,7 @@ Su Windows 10/11 esegui `INSTALL.bat`, poi avvia `RUN.vbs` (o il collegamento Ga
 
 ## Come funziona
 
-- Gallerie, post e profili riconosciuti: estrattori dedicati di [gallery-dl](https://github.com/mikf/gallery-dl). Questi possono includere anche video presenti nella galleria.
+- Gallerie e post riconosciuti: estrattori dedicati di [gallery-dl](https://github.com/mikf/gallery-dl). Questi possono includere anche video presenti nella galleria. Per i profili Instagram l’app legge automaticamente la griglia nel browser e scarica i singoli post: evita così il malfunzionamento del feed profilo presente in gallery-dl 1.32.11.
 - Pagine web comuni, come una homepage o un articolo: lettura delle immagini HTML, lazy-loading, srcset, metadati e immagini strutturate. Viene scelta la variante responsive più grande dichiarata. Se l’HTML non contiene immagini, viene tentata la pagina renderizzata con Chromium.
 - Le immagini delle pagine normali vengono verificate prima del salvataggio; i piccoli elementi inferiori a 64 pixel per lato sono ignorati. I duplicati identici nella stessa pagina vengono saltati. Un link diretto conserva anche le immagini piccole.
 - Ogni operazione usa la sottocartella mostrata nel campo **Cartella**: per esempio `www.repubblica.it`, `www.repubblica.it-sport` o `www.instagram.com-raffaele.pet`. Incollando più link viene usato il nome ricavato dal primo.
@@ -26,7 +26,7 @@ Una homepage scarica le immagini contenute in quella pagina, **non tutti gli art
 
 ## Accesso ai siti
 
-Non vengono richiesti file cookie, password nell’app o modifiche alla sicurezza del browser. Per Instagram l’app tenta prima il download pubblico e poi apre subito un profilo separato nel browser Chromium impostato come predefinito in Windows (Chrome, Brave o Edge). Se il browser predefinito non è compatibile, usa Chromium incluso nell’app. Effettua lì l’accesso una sola volta: la sessione viene riutilizzata automaticamente e resta, separata per browser, nella cartella locale `.browser-profile`, esclusa da Git. Non condividere questa cartella: contiene dati di sessione sensibili. Il download riparte quando il login viene rilevato; l’attesa massima è 5 minuti.
+Non vengono richiesti file cookie, password nell’app o modifiche alla sicurezza del browser. Per Instagram l’app usa il Chromium incluso, in un profilo controllato e separato dai browser personali. Se Instagram impone l’accesso, effettualo lì una sola volta: la sessione viene riutilizzata automaticamente e resta nella cartella locale `.browser-profile`, esclusa da Git. Non condividere questa cartella: contiene dati di sessione sensibili. Il download riparte quando il login viene rilevato; l’attesa massima è 5 minuti.
 
 Questo non elimina le restrizioni imposte da Instagram: login, verifica dell’account, contenuti privati, limiti e cambiamenti del sito possono ancora impedire l’estrazione. Gli altri siti con autenticazione obbligatoria possono richiedere un’integrazione specifica. Nessuna promessa di scaricare qualsiasi URL.
 
